@@ -1,16 +1,17 @@
 var AWS = require('aws-sdk'); // SDK for Nodejs. 
 var docClient; // AWS.DynamoDB.DocumentClient();
 
-var globalSerial; // Pi Serial Number
+var globalSerial; // Here is the Linux SBC serial number
 
 var Gpio = require('onoff').Gpio; //include onoff to interact with the GPIO
 var LED = new Gpio(26, 'out'); //use GPIO pin 26 as output
-var pushButton = new Gpio(13, 'in', 'both', {debounceTimeout: 100}); //use GPIO pin 13 as input, and 'both' button presses, and releases should be handled
+var ParkingSpot = new Gpio(13, 'in', 'both', {debounceTimeout: 100}); //use GPIO pin 13 as input.
+// Treat the signal as a button push: OPEN or CLOSED
 
 const util = require('util');  // required to execute linux command
 const exec = util.promisify(require('child_process').exec); // execute linux command
 
-var arn_sns; // arn of sns topic to send message to our phone
+var arn_sns; // OPTIONAL: arn of sns topic to send message to a mobile phone
 
 fMain(); // main function
 
@@ -19,13 +20,13 @@ async function fMain() {
     var d = new Date();
     console.log("=================================");
     console.log("=================================");
-    console.log(`doorSensor service is UP! -> ${d}`);
-    exec('gpio -g mode 13 down'); // enable pulldown resistor for GPIO 13
-    globalSerial = await fnSerial();  // get pi serial number
+    console.log(`Sensor service is UP! -> ${d}`);
+    exec('gpio -g mode 13 down'); // enable pulldown resistor for GPIO 13 to avoid digial noise
+    globalSerial = await fnSerial();  // get Linux SBC serial number
     console.log(`Serial number: ${globalSerial}`);
-    var myRegion = await fnRegion();  // get AWS region from AWS configure
+    var myRegion = await fnRegion();  // get the AWS region from AWS configure
     console.log(`Region ${myRegion}`);
-    var user = await fnUser();  // get linux user
+    var user = await fnUser();  // get linux user info
     console.log(`User: ${user}`);
 
     AWS.config.update({region: myRegion});
@@ -39,14 +40,14 @@ async function fMain() {
     console.log(`SNS topic ARN ${arn_sns}`);
     // Parameter Store end
     
-    var ButtonStatus = pushButton.readSync();
+    var ParkingSpotStatus = ParkingSpot.readSync();
     var status;
-    if (ButtonStatus == 0) {
+    if (ParkingSpotStatus == 0) {
       LED.write(1);
-      status = "Open!"
+      status = "Occupied"
     } else {
       LED.write(0);
-      status = "Closed!"
+      status = "Not Occupied"
     }
       writeToDynamoDB(status);
       // sendMessage(status);
@@ -55,7 +56,7 @@ async function fMain() {
   }
 }
 
-pushButton.watch(async function (err, value) { //Watch for hardware interrupts on pushButton GPIO, specify callback function
+ParkingSpot.watch(async function (err, value) { //Watch for hardware interrupts on ParkingSpot GPIO, specify callback function
   if (err) { //if an error
     console.error('There was an error', err); //output error message to console
   return;
@@ -63,18 +64,18 @@ pushButton.watch(async function (err, value) { //Watch for hardware interrupts o
   var status;
   if (value == 1) {
     LED.write(0);
-    status = "Closed"
+    status = "Occupied"
   } else
   {
     LED.write(1);
-    status = "Opened"
+    status = "Not Occupied"
   }
   writeToDynamoDB(status);
   // sendMessage(status);
 
 });
 
-async function fnSerial() { // return Pi Serial Number
+async function fnSerial() { // return Linux SBC Serial Number
   const { stdout, stderr } = await exec('cat /proc/cpuinfo | grep Serial');
   // console.log('stdout:', stdout);
   var serialSplit = stdout.split(":");
@@ -122,7 +123,7 @@ function sendMessage(status) {
   var d = new Date();
   var textmessage = new AWS.SNS({apiVersion: '2010-03-31'});
   textmessage.publish({
-    Message: `Device ${globalSerial}: Door is:${status} on ${d}`,  /* required */
+    Message: `Device ${globalSerial}: Parking Spot:${status} on ${d}`,  /* required */
     TopicArn: arn_sns
   },
     function(err,data) {
@@ -137,7 +138,7 @@ function sendMessage(status) {
 function unexportOnClose() { //function to run when exiting program
   LED.writeSync(0); // Turn LED off
   LED.unexport(); // Unexport LED GPIO to free resources
-  pushButton.unexport(); // Unexport Button GPIO to free resources
+  ParkingSpot.unexport(); // Unexport Button GPIO to free resources
 };
 
 process.on('SIGINT', unexportOnClose); //run when user closes using ctrl+c
