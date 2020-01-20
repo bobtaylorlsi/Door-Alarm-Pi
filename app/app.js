@@ -1,4 +1,8 @@
-var AWS = require('aws-sdk'); // SDK for Nodejs. 
+//Forked from https://github.com/perinei/Door-Alarm-Pi by permisson
+//Modified for this work example
+//Date:1-20-2020
+
+var AWS =-require('aws-sdk'); // SDK for Nodejs. 
 var docClient; // AWS.DynamoDB.DocumentClient();
 
 var globalSerial; // Here is the Linux SBC serial number
